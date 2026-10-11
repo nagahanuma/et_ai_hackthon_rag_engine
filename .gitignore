@@ -1,0 +1,67 @@
+# Environment Variables (CRITICAL: Do not commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Virtual Environment (Python)
+Scripts/
+Lib/
+Include/
+share/
+pyvenv.cfg
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Data and Local Storage (Databases & Vector Indices)
+data/
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+
+# Log files and runtime traces
+logs/
+logs/*
+!logs/.gitkeep
+*.log
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# PyCharm / VSCode / Editor settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary and Scratch Files
+*.tmp
+scratch/
+
+# Specific Private Notes, Design Documents, Scripts & PDFs (Excluded from Git)
+ARCHITECTURE_DESIGN.md
+DOCUMENT_LIFECYCLE_DESIGN.md
+DOCUMENT_LIFECYCLE_DESIGN.txt
+DEV_PROCESS_NOTE.txt
+YOUTUBE_VIDEO_SCRIPT.md
+youtube_video_script*
+*.pdf
+!sample_docs/*.pdf

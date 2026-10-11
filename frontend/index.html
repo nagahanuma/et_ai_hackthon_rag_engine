@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Banking Regulatory Compliance RAG Engine</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+    <!-- Top Navigation Header -->
+    <header>
+        <div class="logo-group">
+            <h1>
+                🏛️ Banking Compliance AI
+                <span class="badge-tag">Production RAG</span>
+            </h1>
+        </div>
+        <div style="display: flex; align-items: center; gap: 1.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label for="apiUrlInput" style="font-size: 0.8rem; color: var(--text-muted);">API Backend:</label>
+                <input type="text" id="apiUrlInput" value="http://localhost:8000"
+                    style="background: var(--bg-card); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 0.2rem 0.5rem; font-size: 0.8rem; width: 190px;" />
+            </div>
+            <div class="api-status">
+                <span class="status-dot"></span>
+                <span id="apiStatusText">Engine Online</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="tabs-bar">
+        <button class="tab-btn active" onclick="switchTab('tab-docs')">📁 Documents Manager (CRUD)</button>
+        <button class="tab-btn" onclick="switchTab('tab-chat')">💬 Compliance Audit Chat</button>
+        <button class="tab-btn" onclick="switchTab('tab-flow')">🔬 RAG Process Flow & Observability</button>
+        <button class="tab-btn" onclick="switchTab('tab-storage')">🗄️ Storage Explorer (SQLite vs Chroma)</button>
+    </nav>
+
+    <main>
+
+        <!-- ==========================================
+         TAB 1: DOCUMENTS MANAGER (CRUD)
+         ========================================== -->
+        <section id="tab-docs" class="tab-pane active">
+
+            <!-- Upload Dropzone -->
+            <div class="card">
+                <div class="card-title">
+                    <span>📤 Ingest Regulatory Document</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: normal;">Supported: .pdf,
+                        .docx, .txt, .md (Max 100 MB)</span>
+                </div>
+                <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+                    <p style="font-size: 1.1rem; color: #fff; margin-bottom: 0.5rem;">📁 Click or Drag & Drop Regulatory
+                        Files Here</p>
+                    <p>Streams page-by-page with table extraction, parent-child chunking, and ChromaDB vector indexing
+                    </p>
+                    <input type="file" id="fileInput" style="display: none;" accept=".pdf,.txt,.md"
+                        onchange="handleFileUpload(event)" />
+                </div>
+                <div id="uploadProgressContainer" style="display: none; margin-top: 1rem;">
+                    <div
+                        style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.3rem;">
+                        <span id="uploadStatusLabel" style="color: var(--accent-cyan);">Uploading...</span>
+                        <span id="uploadPercentLabel">0%</span>
+                    </div>
+                    <div
+                        style="width: 100%; height: 6px; background-color: var(--bg-card); border-radius: 3px; overflow: hidden;">
+                        <div id="uploadProgressBar"
+                            style="width: 0%; height: 100%; background-color: var(--accent-cyan); transition: width 0.3s;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Documents Table -->
+            <div class="card">
+                <div class="card-title">
+                    <span>📚 Active Knowledge Base Documents</span>
+                    <button class="btn btn-secondary" onclick="loadDocuments()">🔄 Refresh</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Document Name</th>
+                            <th>Version</th>
+                            <th>Pages</th>
+                            <th>Size</th>
+                            <th>Parent Chunks</th>
+                            <th>Ingested Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="documentsTableBody">
+                        <tr>
+                            <td colspan="7" style="text-align: center; color: var(--text-muted);">Loading active
+                                documents...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </section>
+
+        <!-- ==========================================
+         TAB 2: COMPLIANCE AUDIT CHAT
+         ========================================== -->
+        <section id="tab-chat" class="tab-pane">
+            <div class="chat-window">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message bot">
+                        <p><strong>🏛️ Banking Compliance AI Officer</strong></p>
+                        <p>I am grounded strictly on the active regulatory circulars and policies indexed in the
+                            database. Ask any compliance question to receive verified answers with page citations.</p>
+                    </div>
+                </div>
+                <div class="chat-input-bar">
+                    <input type="text" id="chatInput" class="chat-input"
+                        placeholder="e.g. What did we build in step 4? What are the capital requirements?"
+                        onkeydown="if(event.key === 'Enter') sendQuery()" />
+                    <button class="btn btn-primary" onclick="sendQuery()">Ask Compliance AI</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==========================================
+         TAB 3: RAG PROCESS FLOW & OBSERVABILITY
+         ========================================== -->
+        <section id="tab-flow" class="tab-pane">
+            <div class="card">
+                <div class="card-title">
+                    <span>🔬 Under The Hood: Live Query Execution Trace</span>
+                    <span id="traceQueryBadge" style="font-size: 0.85rem; color: var(--accent-cyan);">No query executed
+                        yet</span>
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                    Shows the exact pipeline execution stages: Vector similarity scoring, BM25 keywords, Reciprocal Rank
+                    Fusion, SQLite parent resolution, and the raw prompt sent to the LLM.
+                </p>
+
+                <!-- Pipeline Step 1: Query & Execution Times -->
+                <div class="flow-step">
+                    <div class="flow-header">
+                        <span>⏱️ Stage 1: Execution Timing Breakdown</span>
+                        <span id="traceTotalTime" style="color: var(--accent-green);">0 ms</span>
+                    </div>
+                    <div id="traceTimingContent" style="display: flex; gap: 1.5rem; font-size: 0.85rem;">
+                        <span>Dense Search: <b id="timeDense">-</b></span>
+                        <span>BM25 Keyword: <b id="timeBM25">-</b></span>
+                        <span>LLM Inference: <b id="timeLLM">-</b></span>
+                    </div>
+                </div>
+
+                <!-- Pipeline Step 2: Dense Vector Matches -->
+                <div class="flow-step">
+                    <div class="flow-header">
+                        <span>🎯 Stage 2: Dense Vector Matches (ChromaDB BGE Model)</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Top Cosine Similarity Chunks</span>
+                    </div>
+                    <div id="traceDenseMatches" class="code-block">Run a query in the chat tab to view dense matches.
+                    </div>
+                </div>
+
+                <!-- Pipeline Step 3: BM25 Sparse Keyword Matches -->
+                <div class="flow-step">
+                    <div class="flow-header">
+                        <span>🔤 Stage 3: Sparse Keyword Matches (BM25 Okapi)</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Exact Statutory Keyword
+                            Scoring</span>
+                    </div>
+                    <div id="traceBM25Matches" class="code-block">Run a query in the chat tab to view BM25 keyword
+                        matches.</div>
+                </div>
+
+                <!-- Pipeline Step 4: Resolved Parent Chunks from SQLite -->
+                <div class="flow-step">
+                    <div class="flow-header">
+                        <span>🏛️ Stage 4: Resolved Parent Legal Sections (SQLite Ground Truth)</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Decoupled Small-to-Big
+                            Retrieval</span>
+                    </div>
+                    <div id="traceParentContexts" class="code-block">Run a query in the chat tab to view resolved parent
+                        contexts.</div>
+                </div>
+
+                <!-- Pipeline Step 5: Exact Prompt Passed to LLM -->
+                <div class="flow-step">
+                    <div class="flow-header">
+                        <span>🤖 Stage 5: Final Assembled Prompt Sent to LLM</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Zero-Hallucination Guardrail
+                            Template</span>
+                    </div>
+                    <div id="traceLLMPrompt" class="code-block">Run a query in the chat tab to view raw LLM prompt.
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ==========================================
+         TAB 4: STORAGE EXPLORER (SQLITE vs CHROMADB)
+         ========================================== -->
+        <section id="tab-storage" class="tab-pane">
+            <div class="card">
+                <div class="card-title">
+                    <span>🗄️ Raw Storage Inspector: Relational Ground Truth vs. Vector Index</span>
+                    <button class="btn btn-secondary" onclick="loadStorageInspector()">🔄 Refresh Storage</button>
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                    Inspect the live database records. Left: Full legal sections and audit state in SQLite. Right: Child
+                    chunk embeddings and metadata payloads in ChromaDB.
+                </p>
+
+                <div class="split-view">
+
+                    <!-- SQLite Side -->
+                    <!-- SQLite Side -->
+                    <div class="card" style="margin-bottom: 0;">
+                        <div class="card-title" style="color: var(--accent-blue); font-size: 0.95rem;">
+                            <span>💾 SQLite Table: `parent_chunks` (Relational Ground Truth)</span>
+                        </div>
+                        <div id="sqliteStorageView">Loading SQLite records...</div>
+                    </div>
+
+                    <!-- ChromaDB Side -->
+                    <div class="card" style="margin-bottom: 0;">
+                        <div class="card-title" style="color: var(--accent-cyan); font-size: 0.95rem;">
+                            <span>⚡ ChromaDB Collection: `child_chunks` (Vector Space)</span>
+                        </div>
+                        <div id="chromaStorageView">Loading ChromaDB vectors...</div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

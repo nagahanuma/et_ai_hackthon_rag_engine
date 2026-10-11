@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Virtual Environments
+Scripts/
+Lib/
+Include/
+share/
+pyvenv.cfg
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local Database & Logs
+data/
+logs/
+*.log
+
+# Environment files
+.env
+
+# Documentation, Notes, Video Scripts & PDFs
+scratch/
+*.md
+!README.md
+ARCHITECTURE_DESIGN.md
+DOCUMENT_LIFECYCLE_DESIGN.md
+DOCUMENT_LIFECYCLE_DESIGN.txt
+DEV_PROCESS_NOTE.txt
+YOUTUBE_VIDEO_SCRIPT.md
+youtube_video_script*
+*.pdf
+!sample_docs/*.pdf
