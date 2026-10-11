@@ -109,6 +109,10 @@
          TAB 2: COMPLIANCE AUDIT CHAT
          ========================================== -->
         <section id="tab-chat" class="tab-pane">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                <span style="font-size: 0.9rem; color: var(--text-muted);">💬 Real-Time Compliance Auditor (Strict Grounding)</span>
+                <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 4px 12px;" onclick="clearSemanticCacheUI()" title="Purges all cached answers from ChromaDB so you can demonstrate fresh LLM vs Cache Hit">🧹 Reset Semantic Cache</button>
+            </div>
             <div class="chat-window">
                 <div class="chat-messages" id="chatMessages">
                     <div class="message bot">

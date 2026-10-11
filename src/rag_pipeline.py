@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from src.hybrid_retriever import HybridRetriever, RetrievedContext
 from src.models import LLMFactory, BaseLLMClient
 from src.db import get_document_by_id
+from src.semantic_cache import SemanticCache, CacheResult
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -54,11 +55,21 @@ class ComplianceRAGPipeline:
     def __init__(
         self,
         retriever: Optional[HybridRetriever] = None,
-        llm_client: Optional[BaseLLMClient] = None
+        llm_client: Optional[BaseLLMClient] = None,
+        enable_cache: bool = True
     ):
         self.retriever = retriever or HybridRetriever()
         self.llm = llm_client or LLMFactory.get_client()
-        logger.info("Compliance RAG Pipeline successfully initialized.")
+        self.enable_cache = enable_cache
+        if self.enable_cache:
+            # Share loaded SentenceTransformer model from retriever to avoid extra RAM
+            self.semantic_cache = SemanticCache(
+                embedding_model=self.retriever.vector_manager.embedding_model,
+                similarity_threshold=0.88
+            )
+        else:
+            self.semantic_cache = None
+        logger.info("Compliance RAG Pipeline successfully initialized with Semantic Cache.")
 
     def _build_context_prompt(self, contexts: List[RetrievedContext]) -> Tuple[str, List[Citation]]:
         """Formats retrieved parent contexts into an annotated prompt block with citations."""
@@ -96,9 +107,58 @@ class ComplianceRAGPipeline:
     def query(self, user_question: str) -> ComplianceAnswer:
         """
         Executes complete RAG workflow and collects end-to-end observability trace.
+        Checks Semantic Vector Cache first. If hit, bypasses retrieval and LLM.
         """
         start_time = time.perf_counter()
         logger.info(f"Processing compliance query: '{user_question}'")
+
+        # 0. Check In-Engine Semantic Vector Cache
+        if self.semantic_cache:
+            cache_hit = self.semantic_cache.lookup(user_question)
+            if cache_hit:
+                logger.info(
+                    f"⚡ [SEMANTIC CACHE HIT] Bypassing LLM in {cache_hit.latency_ms:.1f}ms! "
+                    f"Similarity: {cache_hit.similarity_score:.4f} against '{cache_hit.matched_query}'"
+                )
+                cached_citations = [
+                    Citation(
+                        doc_id=c.get("doc_id", "cached"),
+                        filename=c.get("filename", "Verified Regulatory Context"),
+                        page_number=c.get("page_number", 1),
+                        parent_id=c.get("parent_id", "cached"),
+                        content_type=c.get("content_type", "text")
+                    )
+                    for c in cache_hit.citations
+                ]
+                trace = {
+                    "cache_hit": True,
+                    "matched_query": cache_hit.matched_query,
+                    "similarity_score": cache_hit.similarity_score,
+                    "timing_breakdown": {
+                        "cache_lookup_ms": round(cache_hit.latency_ms, 2),
+                        "dense_search_ms": 0.0,
+                        "bm25_search_ms": 0.0,
+                        "llm_generation_ms": 0.0,
+                        "total_ms": round(cache_hit.latency_ms, 2),
+                    },
+                    "dense_vector_matches": [],
+                    "bm25_keyword_matches": [],
+                    "resolved_parent_contexts": [],
+                    "full_prompt_sent_to_llm": {
+                        "system_prompt": "Bypassed via In-Engine Semantic Cache (0 LLM Tokens)",
+                        "user_prompt": f"Matched previous verified query: '{cache_hit.matched_query}' (Similarity: {cache_hit.similarity_score * 100:.1f}%)"
+                    }
+                }
+                return ComplianceAnswer(
+                    query=user_question,
+                    answer=cache_hit.answer,
+                    citations=cached_citations,
+                    execution_time_ms=cache_hit.latency_ms,
+                    total_sources_retrieved=len(cached_citations),
+                    trace=trace
+                )
+            else:
+                logger.info(f"[SEMANTIC CACHE MISS] Query not in cache -> Routing to Dense Vector + BM25 Hybrid Retrieval...")
 
         # 1. Capture Dense Vector Matches (ChromaDB)
         t_dense_start = time.perf_counter()
@@ -145,7 +205,7 @@ class ComplianceRAGPipeline:
                 citations=[],
                 execution_time_ms=(time.perf_counter() - start_time) * 1000,
                 total_sources_retrieved=0,
-                trace={"dense_matches": dense_trace, "bm25_matches": bm25_trace, "resolved_parents": []}
+                trace={"cache_hit": False, "dense_matches": dense_trace, "bm25_matches": bm25_trace, "resolved_parents": []}
             )
 
         # 4. Assembled Parent Contexts
@@ -183,9 +243,15 @@ class ComplianceRAGPipeline:
         citation_summary = [f"{c.filename} (p.{c.page_number})" for c in citations]
         logger.info(f"[QUERY COMPLETED] in {total_elapsed_ms:.1f}ms (Retrieval: {dense_time_ms+bm25_time_ms:.1f}ms, LLM: {llm_time_ms:.1f}ms) | Citations: {citation_summary}")
 
+        # 6. Store in In-Engine Semantic Cache for future identical / rephrased queries
+        if self.semantic_cache and raw_answer and "This topic is not covered" not in raw_answer:
+            self.semantic_cache.store(query=user_question, answer=raw_answer, citations=citations)
+
         # Compile Full Pipeline Trace for Frontend Visualizer
         trace = {
+            "cache_hit": False,
             "timing_breakdown": {
+                "cache_lookup_ms": 0.0,
                 "dense_search_ms": round(dense_time_ms, 2),
                 "bm25_search_ms": round(bm25_time_ms, 2),
                 "llm_generation_ms": round(llm_time_ms, 2),

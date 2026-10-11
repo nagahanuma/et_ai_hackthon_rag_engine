@@ -191,6 +191,9 @@ EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
 ### 5. Launch the Application
 ```bash
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+or
+python -m uvicorn src.main:app --reload
+
 ```
 
 ---

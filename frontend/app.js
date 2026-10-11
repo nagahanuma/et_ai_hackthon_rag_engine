@@ -233,11 +233,15 @@ async function sendQuery() {
           </div>`
                 : "";
 
+        const cacheBadge = data.trace && data.trace.cache_hit
+            ? `<span style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 12px; font-weight: 600;">⚡ CACHE HIT (${data.execution_time_ms.toFixed(0)} ms - 0 Tokens)</span>`
+            : `<span>⏱️ Latency: ${data.execution_time_ms.toFixed(0)} ms</span>`;
+
         botDiv.innerHTML = `
       <p style="white-space: pre-wrap;">${escapeHtml(data.answer)}</p>
       ${citationsHtml}
-      <div style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted); display: flex; justify-content: space-between;">
-        <span>⏱️ Latency: ${data.execution_time_ms.toFixed(0)} ms</span>
+      <div style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;">
+        ${cacheBadge}
         <a href="javascript:void(0)" onclick="switchTab('tab-flow')" style="color: var(--accent-cyan); text-decoration: none;">View Process Trace ➔</a>
       </div>
     `;
@@ -253,18 +257,36 @@ async function sendQuery() {
     }
 }
 
+async function clearSemanticCacheUI() {
+    if (!confirm("Are you sure you want to reset the Semantic Cache? All stored Q&A cache pairs will be cleared from ChromaDB.")) {
+        return;
+    }
+    try {
+        const res = await fetch(`${getApiUrl()}/api/v1/cache/clear`, { method: "DELETE" });
+        if (res.ok) {
+            alert("⚡ Semantic Cache successfully cleared!\n\nYour next queries will execute fresh Hybrid RAG + LLM inference.");
+        } else {
+            const data = await res.json();
+            alert("Notice: " + (data.detail || "Cache reset complete."));
+        }
+    } catch (err) {
+        alert("Failed to reset cache: " + err.message);
+    }
+}
+
 // ==========================================
 // 4. OBSERVABILITY & PROCESS FLOW INSPECTOR
 // ==========================================
 
 function renderTrace(trace, query, totalTime) {
-    document.getElementById("traceQueryBadge").textContent = `Query: "${query}"`;
+    const cacheHitStr = trace.cache_hit ? " | ⚡ [CACHE HIT - BYPASSED LLM]" : "";
+    document.getElementById("traceQueryBadge").textContent = `Query: "${query}"${cacheHitStr}`;
     document.getElementById("traceTotalTime").textContent = `${totalTime.toFixed(0)} ms`;
 
     if (trace.timing_breakdown) {
-        document.getElementById("timeDense").textContent = `${trace.timing_breakdown.dense_search_ms} ms`;
-        document.getElementById("timeBM25").textContent = `${trace.timing_breakdown.bm25_search_ms} ms`;
-        document.getElementById("timeLLM").textContent = `${trace.timing_breakdown.llm_generation_ms} ms`;
+        document.getElementById("timeDense").textContent = `${trace.timing_breakdown.dense_search_ms || 0} ms`;
+        document.getElementById("timeBM25").textContent = `${trace.timing_breakdown.bm25_search_ms || 0} ms`;
+        document.getElementById("timeLLM").textContent = `${trace.timing_breakdown.llm_generation_ms || 0} ms`;
     }
 
     // Dense Matches

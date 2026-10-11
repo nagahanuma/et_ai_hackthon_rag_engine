@@ -168,16 +168,16 @@ if __name__ == "__main__":
 
     cache = SemanticCache(similarity_threshold=0.88)
 
-    # Simulated Q&A pair
-    sample_query = "What is the formula to convert CGPA to percentage?"
-    sample_answer = "Percentage of Marks = (10 × CGPA) – 7.5 as specified in Section 5.4(e)."
-    sample_citations = [{"filename": "regulations.pdf", "page_number": 38}]
+    # Simulated Banking Q&A pair
+    sample_query = "What is the minimum Common Equity Tier 1 (CET1) capital ratio requirement under Basel III circulars?"
+    sample_answer = "Under Basel III statutory norms, the minimum CET1 capital ratio is 8.00% of risk-weighted assets, supported by a 2.50% Capital Conservation Buffer (CCB)."
+    sample_citations = [{"filename": "RBI_Prudential_Norms_Basel_III_2024.pdf", "page_number": 1}]
 
     print(f"\n1. Storing prime query: '{sample_query}'")
     cache.store(sample_query, sample_answer, sample_citations)
 
     # Test Case A: Semantically identical query with completely different wording
-    test_query_hit = "how to calculate percentage from cgpa?"
+    test_query_hit = "What are the minimum capital adequacy ratios prescribed by RBI under Basel III?"
     print(f"\n2. Querying different wording: '{test_query_hit}'")
     hit_result = cache.lookup(test_query_hit)
 
@@ -190,13 +190,14 @@ if __name__ == "__main__":
         print("   >>> CACHE MISS")
 
     # Test Case B: Completely different query
-    test_query_miss = "What are the capital adequacy requirements for credit risk?"
+    test_query_miss = "What is the prescribed limit for commercial real estate exposure?"
     print(f"\n3. Querying unrelated question: '{test_query_miss}'")
     miss_result = cache.lookup(test_query_miss)
 
     if miss_result:
         print(f"   >>> CACHE HIT: {miss_result.answer}")
     else:
-        print(f"   >>> ❌ CACHE MISS! (Correct behavior: routes to Hybrid RAG + LLM)")
+        print("   >>> ❌ CACHE MISS! (Correct behavior: routes to Hybrid RAG + LLM)")
 
     print("\n" + "=" * 70)
+

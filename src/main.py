@@ -215,6 +215,29 @@ def query_compliance(request: QueryRequest):
     )
 
 
+@app.get("/api/v1/cache/status")
+def get_cache_status():
+    """Returns semantic cache metrics and total cached queries."""
+    if hasattr(rag_pipeline, "semantic_cache") and rag_pipeline.semantic_cache:
+        count = rag_pipeline.semantic_cache.collection.count()
+        return {
+            "status": "active",
+            "total_cached_queries": count,
+            "similarity_threshold": rag_pipeline.semantic_cache.threshold,
+            "collection_name": rag_pipeline.semantic_cache.collection_name
+        }
+    return {"status": "disabled", "total_cached_queries": 0}
+
+
+@app.delete("/api/v1/cache/clear")
+def clear_semantic_cache():
+    """Purges the in-engine semantic cache collection."""
+    if hasattr(rag_pipeline, "semantic_cache") and rag_pipeline.semantic_cache:
+        rag_pipeline.semantic_cache.clear()
+        return {"status": "cleared", "message": "Semantic cache purged successfully."}
+    return {"status": "not_active"}
+
+
 # ==========================================
 # 3. LIVE STORAGE INSPECTORS (SQLITE vs CHROMADB)
 # ==========================================
