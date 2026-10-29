@@ -115,16 +115,42 @@ class OpenAIClient(BaseLLMClient):
 
 
 class LLMFactory:
-    """Factory creating the appropriate LLM client based on environment settings."""
+    """Factory creating the appropriate LLM client based on user preferences or environment settings."""
 
     @staticmethod
-    def get_client() -> BaseLLMClient:
+    def get_client(
+        custom_groq_key: Optional[str] = None, 
+        custom_openai_key: Optional[str] = None,
+        custom_model: Optional[str] = None
+    ) -> BaseLLMClient:
+        # 1. Custom OpenAI Key (BYOK)
+        if custom_openai_key and custom_openai_key.strip():
+            selected_model = custom_model.strip() if (custom_model and "gpt" in custom_model.lower()) else "gpt-4o-mini"
+            logger.info(f"Using User Custom OpenAI Key with model: '{selected_model}'")
+            return OpenAIClient(
+                api_key=custom_openai_key.strip(),
+                model=selected_model,
+                temperature=0.0
+            )
+
+        # 2. Custom Groq Key (BYOK)
+        if custom_groq_key and custom_groq_key.strip():
+            selected_model = custom_model.strip() if (custom_model and any(k in custom_model.lower() for k in ["llama", "gpt", "deepseek", "mixtral"])) else settings.LLM_MODEL
+            logger.info(f"Using User Custom Groq Key with model: '{selected_model}'")
+            return GroqClient(
+                api_key=custom_groq_key.strip(),
+                model=selected_model,
+                temperature=settings.LLM_TEMPERATURE
+            )
+
+        # 3. Fallback to System Default Environment Settings
         provider = settings.LLM_PROVIDER.lower().strip()
-        
         if provider == "groq":
+            groq_model = custom_model.strip() if (custom_model and any(k in custom_model.lower() for k in ["llama", "gpt", "deepseek", "mixtral"])) else settings.LLM_MODEL
+            logger.info(f"Using System Default Groq Key with model: '{groq_model}'")
             return GroqClient(
                 api_key=settings.GROQ_API_KEY,
-                model=settings.LLM_MODEL,
+                model=groq_model,
                 temperature=settings.LLM_TEMPERATURE
             )
         elif provider == "openai":
@@ -142,3 +168,4 @@ class LLMFactory:
             )
         else:
             raise ValueError(f"Unsupported LLM_PROVIDER: '{provider}'. Supported: 'groq', 'openai', 'ollama'")
+

@@ -1,40 +1,30 @@
-# Git
+# Git and metadata
 .git
 .gitignore
+.dockerignore
+*.md
+render.yaml
 
-# Virtual Environments
-Scripts/
-Lib/
-Include/
-share/
-pyvenv.cfg
+# Virtual environments
 venv/
 .venv/
 env/
+Scripts/
+Lib/
+Include/
 
-# Python cache
+# Python caches
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+.pytest_cache/
 
-# Local Database & Logs
-data/
-logs/
-*.log
-
-# Environment files
+# Local sensitive environment files (pass at runtime via Secret Manager / Cloud Run env vars)
 .env
+.env.local
 
-# Documentation, Notes, Video Scripts & PDFs
-scratch/
-*.md
-!README.md
-ARCHITECTURE_DESIGN.md
-DOCUMENT_LIFECYCLE_DESIGN.md
-DOCUMENT_LIFECYCLE_DESIGN.txt
-DEV_PROCESS_NOTE.txt
-YOUTUBE_VIDEO_SCRIPT.md
-youtube_video_script*
-*.pdf
-!sample_docs/*.pdf
+# Local file storage
+data/
+uploads/
+test_*.py
+tools/

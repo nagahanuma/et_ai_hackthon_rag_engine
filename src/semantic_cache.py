@@ -1,5 +1,5 @@
 """
-In-Engine Semantic Caching for Banking Compliance RAG.
+In-Engine Semantic Caching for Document Intelligence & Compliance RAG.
 Features:
 - 100% Free: Uses existing local ChromaDB instance & BGE-small embedding model.
 - Sub-10ms Latency: Returns cached answers for semantically identical questions.
@@ -42,10 +42,12 @@ class SemanticCache:
         self,
         embedding_model: Optional[SentenceTransformer] = None,
         similarity_threshold: float = 0.90,
-        collection_name: str = "compliance_semantic_cache_v1"
+        collection_name: Optional[str] = None
     ):
         self.threshold = similarity_threshold
-        self.collection_name = collection_name
+        # Derive collection name from embedding model to prevent dimension collisions
+        model_slug = settings.EMBEDDING_MODEL.replace("/", "_").replace("-", "_")
+        self.collection_name = collection_name or f"cache_{model_slug}"
 
         # 1. Reuse existing persistent ChromaDB storage
         self.chroma_client = chromadb.PersistentClient(
@@ -63,27 +65,52 @@ class SemanticCache:
         if embedding_model:
             self.model = embedding_model
         else:
-            logger.info("Initializing embedding model for Semantic Cache...")
-            self.model = SentenceTransformer(settings.EMBEDDING_MODEL)
+            logger.info(f"Initializing embedding model for Semantic Cache on device '{settings.EMBEDDING_DEVICE}'...")
+            self.model = SentenceTransformer(settings.EMBEDDING_MODEL, device=settings.EMBEDDING_DEVICE)
 
-        logger.info(f"Semantic Cache ready (Threshold: {self.threshold}, Total Cached: {self.collection.count()})")
+        logger.info(f"Semantic Cache ready (Collection: {self.collection_name}, Threshold: {self.threshold}, Total Cached: {self.collection.count()})")
 
-    def lookup(self, query: str) -> Optional[CacheResult]:
+    def lookup(
+        self, 
+        query: str, 
+        allowed_doc_ids: Optional[List[str]] = None, 
+        is_admin: bool = False
+    ) -> Optional[CacheResult]:
         """
-        Checks if a semantically equivalent query was answered before.
-        Returns CacheResult if similarity >= threshold, else None.
+        Checks cache for a semantically equivalent query using cosine similarity.
+        Enforces strict multi-tenant isolation: standard users cannot hit cached answers 
+        derived from documents they do not own.
         """
+        # If standard user has 0 documents, cache lookup must not return documents
+        if not is_admin and allowed_doc_ids is not None and len(allowed_doc_ids) == 0:
+            logger.debug("[CACHE BYPASSED] User has 0 indexed documents.")
+            return None
+
         if self.collection.count() == 0:
             return None
 
         t0 = time.perf_counter()
         query_vec = self.model.encode([query], normalize_embeddings=True).tolist()[0]
 
-        results = self.collection.query(
-            query_embeddings=[query_vec],
-            n_results=1,
-            include=["documents", "metadatas", "distances"]
-        )
+        try:
+            results = self.collection.query(
+                query_embeddings=[query_vec],
+                n_results=1,
+                include=["documents", "metadatas", "distances"]
+            )
+        except Exception as e:
+            if "dimension" in str(e).lower():
+                logger.warning(f"Cache dimension mismatch ({e}). Resetting cache collection...")
+                try:
+                    self.chroma_client.delete_collection(self.collection_name)
+                except Exception:
+                    pass
+                self.collection = self.chroma_client.create_collection(
+                    name=self.collection_name,
+                    metadata={"hnsw:space": "cosine"}
+                )
+                return None
+            raise e
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
@@ -96,17 +123,39 @@ class SemanticCache:
                 metadata = results["metadatas"][0][0]
                 matched_orig_query = results["documents"][0][0]
 
-                logger.info(
-                    f"⚡ [CACHE HIT] Similarity: {similarity:.4f} >= {self.threshold} | "
-                    f"Matched: '{matched_orig_query}' | Retrieved in {elapsed_ms:.1f}ms"
-                )
-
                 citations = []
                 if "citations_json" in metadata and metadata["citations_json"]:
                     try:
                         citations = json.loads(metadata["citations_json"])
                     except Exception:
                         citations = []
+
+                # Multi-tenant isolation verification
+                if not is_admin and allowed_doc_ids is not None:
+                    cached_doc_ids = set()
+                    for c in citations:
+                        d_id = c.get("doc_id")
+                        if d_id and d_id != "cached":
+                            cached_doc_ids.add(d_id)
+                    
+                    raw_meta_doc_ids = metadata.get("doc_ids", "")
+                    if raw_meta_doc_ids:
+                        for d_id in raw_meta_doc_ids.split(","):
+                            if d_id.strip():
+                                cached_doc_ids.add(d_id.strip())
+
+                    # If cached entry references documents not owned by this user, REJECT IT!
+                    if cached_doc_ids and not cached_doc_ids.issubset(set(allowed_doc_ids)):
+                        logger.info(
+                            f"⚡ [CACHE TENANT ISOLATION REJECTION] Cache match '{matched_orig_query}' (Similarity: {similarity}) "
+                            f"rejected: cached docs {cached_doc_ids} not in allowed user docs {allowed_doc_ids}."
+                        )
+                        return None
+
+                logger.info(
+                    f"⚡ [CACHE HIT] Similarity: {similarity:.4f} >= {self.threshold} | "
+                    f"Matched: '{matched_orig_query}' | Retrieved in {elapsed_ms:.1f}ms"
+                )
 
                 return CacheResult(
                     is_hit=True,
@@ -120,19 +169,25 @@ class SemanticCache:
         logger.debug(f"[CACHE MISS] No semantically similar query found in cache ({elapsed_ms:.1f}ms).")
         return None
 
-    def store(self, query: str, answer: str, citations: List[Any]):
-        """Saves a verified Q&A pair and citations into the semantic cache."""
+    def store(self, query: str, answer: str, citations: List[Any], user_id: Optional[str] = None):
+        """Saves a verified Q&A pair and citations into the semantic cache with tenant metadata."""
         try:
             query_vec = self.model.encode([query], normalize_embeddings=True).tolist()[0]
             cache_id = f"cache_{uuid.uuid4().hex[:8]}"
 
             # Serialize citations cleanly
             serializable_citations = []
+            doc_ids = set()
             for c in citations:
                 if hasattr(c, "__dict__"):
-                    serializable_citations.append(c.__dict__)
+                    d = c.__dict__
+                    serializable_citations.append(d)
+                    if d.get("doc_id"):
+                        doc_ids.add(str(d["doc_id"]))
                 elif isinstance(c, dict):
                     serializable_citations.append(c)
+                    if c.get("doc_id"):
+                        doc_ids.add(str(c["doc_id"]))
 
             self.collection.add(
                 ids=[cache_id],
@@ -141,10 +196,12 @@ class SemanticCache:
                 metadatas=[{
                     "answer": answer,
                     "citations_json": json.dumps(serializable_citations),
+                    "doc_ids": ",".join(sorted(doc_ids)),
+                    "user_id": user_id or "system",
                     "stored_at": time.time()
                 }]
             )
-            logger.info(f"Cached query '{query}' under id '{cache_id}'.")
+            logger.info(f"Cached query '{query}' under id '{cache_id}' (Doc IDs: {list(doc_ids)}).")
         except Exception as e:
             logger.warning(f"Failed to store entry in semantic cache: {e}")
 

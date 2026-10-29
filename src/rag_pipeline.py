@@ -5,13 +5,15 @@ Captures comprehensive observability traces (Dense, BM25, RRF, Parent Chunks, LL
 """
 
 import time
+import uuid
 from typing import List, Dict, Any, Optional, Generator, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 from src.hybrid_retriever import HybridRetriever, RetrievedContext
 from src.models import LLMFactory, BaseLLMClient
-from src.db import get_document_by_id
+from src.db import get_document_by_id, save_chat_message, get_recent_chat_history
 from src.semantic_cache import SemanticCache, CacheResult
+from src.config import settings
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -35,6 +37,7 @@ class ComplianceAnswer:
     citations: List[Citation]
     execution_time_ms: float
     total_sources_retrieved: int
+    session_id: Optional[str] = None
     trace: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -42,14 +45,26 @@ class ComplianceRAGPipeline:
     """The master orchestrator for banking regulatory query answering."""
 
     SYSTEM_PROMPT = (
-        "You are an expert Banking and Financial Regulatory Compliance Officer. "
-        "Your task is to answer questions strictly using the provided regulatory contexts below. "
-        "RULES:\n"
-        "1. Only use facts directly stated in the contexts. Do NOT extrapolate or assume.\n"
-        "2. If the contexts do not contain enough information to answer, state clearly: "
-        "'This topic is not covered in the current active regulatory documents.'\n"
-        "3. When stating rules, percentages, limits, or requirements, cite the specific document and page number.\n"
-        "4. If markdown tables are provided, preserve their numerical accuracy."
+        "You are an advanced, domain-agnostic Document Intelligence AI Assistant. "
+        "Your purpose is to thoroughly analyze any uploaded documents—including technical specifications, "
+        "problem statements, rules, legal contracts, regulatory guidelines, research papers, and operational reports—"
+        "and answer questions accurately and strictly based on the provided context excerpts.\n\n"
+        "CORE OPERATING PRINCIPLES:\n"
+        "1. STRICT FACTUAL GROUNDING: Base your answer solely on the provided document excerpts. "
+        "Do NOT extrapolate, hallucinate, or assume facts not present in the text.\n"
+        "2. DOCUMENT AWARENESS & INTENT ORIENTATION: Adapt your tone and terminology directly to the domain "
+        "of the uploaded document. When answering broad, exploratory, or overview questions (e.g. 'what are key points?', "
+        "'summarize this document', 'what is this about?'), always start with a concise 1-2 sentence orientation "
+        "stating what the document is, its core topic/objective/problem statement, and its scope before presenting detailed sections or rules.\n"
+        "3. ACCURATE SYNTHESIS: Answer the user's specific inquiry using the relevant facts, rules, steps, definitions, "
+        "metrics, or guidelines available in the excerpts.\n"
+        "4. CLEAN STRUCTURE: Present information clearly using natural paragraphs, structured bullet points, "
+        "or clean Markdown tables when comparing criteria or listing structured rules. Do NOT clutter the answer with "
+        "repetitive document filenames—the audit engine independently tracks and displays all source citations in the verification panel.\n"
+        "5. NUMERICAL & DETAIL ACCURACY: If tabular data, scoring rules, numerical thresholds, dates, or formulas are present, "
+        "preserve their exact details and precision.\n"
+        "6. OUT-OF-BOUNDS REFUSAL: Only state 'This topic is not covered in the uploaded documents.' if the provided "
+        "excerpts contain zero relevant information regarding the inquiry."
     )
 
     def __init__(
@@ -104,17 +119,42 @@ class ComplianceRAGPipeline:
         context_string = "\n".join(formatted_blocks)
         return context_string, citations
 
-    def query(self, user_question: str) -> ComplianceAnswer:
+    def query(
+        self, 
+        user_question: str, 
+        session_id: Optional[str] = None,
+        custom_groq_key: Optional[str] = None,
+        custom_openai_key: Optional[str] = None,
+        custom_model: Optional[str] = None,
+        user_id: Optional[str] = None,
+        is_admin: bool = False
+    ) -> ComplianceAnswer:
         """
-        Executes complete RAG workflow and collects end-to-end observability trace.
+        Executes complete RAG workflow, multi-turn conversational memory, and collects end-to-end trace.
         Checks Semantic Vector Cache first. If hit, bypasses retrieval and LLM.
+        Supports BYOK (Bring Your Own Key) for Groq or OpenAI.
+        Enforces user document isolation (only Admin searches global documents).
         """
         start_time = time.perf_counter()
-        logger.info(f"Processing compliance query: '{user_question}'")
+        active_session_id = session_id or f"sess_{uuid.uuid4().hex[:12]}"
+        logger.info(f"Processing compliance query [Session: {active_session_id}, User: {user_id}, Admin: {is_admin}]: '{user_question}'")
 
-        # 0. Check In-Engine Semantic Vector Cache
+        # Resolve document ownership filter (Admin sees all; standard user only sees their own documents)
+        allowed_doc_ids = None
+        if user_id and not is_admin:
+            from src.db import get_user_doc_ids
+            allowed_doc_ids = get_user_doc_ids(user_id)
+
+        # Fetch recent conversational context for multi-turn dialogue
+        recent_history = get_recent_chat_history(active_session_id, limit=6)
+
+        # 0. Check In-Engine Semantic Vector Cache (Multi-tenant isolated)
         if self.semantic_cache:
-            cache_hit = self.semantic_cache.lookup(user_question)
+            cache_hit = self.semantic_cache.lookup(
+                user_question, 
+                allowed_doc_ids=allowed_doc_ids, 
+                is_admin=is_admin
+            )
             if cache_hit:
                 logger.info(
                     f"⚡ [SEMANTIC CACHE HIT] Bypassing LLM in {cache_hit.latency_ms:.1f}ms! "
@@ -130,6 +170,10 @@ class ComplianceRAGPipeline:
                     )
                     for c in cache_hit.citations
                 ]
+                # Save conversation turns (user query and final answer only)
+                save_chat_message(active_session_id, "user", user_question, user_id=user_id)
+                save_chat_message(active_session_id, "assistant", cache_hit.answer, user_id=user_id)
+
                 trace = {
                     "cache_hit": True,
                     "matched_query": cache_hit.matched_query,
@@ -155,14 +199,19 @@ class ComplianceRAGPipeline:
                     citations=cached_citations,
                     execution_time_ms=cache_hit.latency_ms,
                     total_sources_retrieved=len(cached_citations),
+                    session_id=active_session_id,
                     trace=trace
                 )
             else:
                 logger.info(f"[SEMANTIC CACHE MISS] Query not in cache -> Routing to Dense Vector + BM25 Hybrid Retrieval...")
 
-        # 1. Capture Dense Vector Matches (ChromaDB)
+        # 1. Capture Dense Vector Matches (ChromaDB or pgvector)
         t_dense_start = time.perf_counter()
-        dense_results = self.retriever.vector_manager.search(query=user_question, top_k=10)
+        dense_results = self.retriever.vector_manager.search(
+            query=user_question, 
+            top_k=10, 
+            allowed_doc_ids=allowed_doc_ids
+        )
         dense_time_ms = (time.perf_counter() - t_dense_start) * 1000
 
         dense_trace = [
@@ -181,6 +230,8 @@ class ComplianceRAGPipeline:
         if not self.retriever.bm25_index:
             self.retriever.build_bm25_index()
         bm25_results = self.retriever.search_bm25(query=user_question, top_k=10)
+        if allowed_doc_ids is not None:
+            bm25_results = [r for r in bm25_results if r.get("doc_id") in allowed_doc_ids]
         bm25_time_ms = (time.perf_counter() - t_bm25_start) * 1000
 
         bm25_trace = [
@@ -195,26 +246,44 @@ class ComplianceRAGPipeline:
         ]
 
         # 3. Hybrid Search & Parent Context Resolution
-        contexts = self.retriever.retrieve(query=user_question, final_top_parents=5)
+        top_k_parents = getattr(settings, "TOP_PARENT_CONTEXTS", 3)
+        contexts = self.retriever.retrieve(
+            query=user_question, 
+            final_top_parents=top_k_parents,
+            allowed_doc_ids=allowed_doc_ids
+        )
 
         if not contexts:
             logger.warning("No relevant regulatory contexts found for query.")
+            if allowed_doc_ids is not None and len(allowed_doc_ids) == 0:
+                fallback_answer = "You have not uploaded any regulatory documents yet. Please upload a compliance PDF/document in the Documents tab first."
+            else:
+                fallback_answer = "No relevant regulatory documents were found matching your query."
+            save_chat_message(active_session_id, "user", user_question, user_id=user_id)
+            save_chat_message(active_session_id, "assistant", fallback_answer, user_id=user_id)
             return ComplianceAnswer(
                 query=user_question,
-                answer="No relevant regulatory documents were found matching your query.",
+                answer=fallback_answer,
                 citations=[],
                 execution_time_ms=(time.perf_counter() - start_time) * 1000,
                 total_sources_retrieved=0,
+                session_id=active_session_id,
                 trace={"cache_hit": False, "dense_matches": dense_trace, "bm25_matches": bm25_trace, "resolved_parents": []}
             )
 
-        # 4. Assembled Parent Contexts
+        # 4. Assembled Parent Contexts & Conversation Turns
         context_str, citations = self._build_context_prompt(contexts)
         
+        conversation_history_block = ""
+        if recent_history:
+            history_lines = [f"{m['role'].capitalize()}: {m['content']}" for m in recent_history]
+            conversation_history_block = "PRIOR CONVERSATION HISTORY:\n" + "\n".join(history_lines) + "\n\n"
+
         user_prompt = (
-            f"REGULATORY CONTEXT EXCERPTS:\n{context_str}\n\n"
-            f"COMPLIANCE QUESTION: {user_question}\n\n"
-            f"Provide a structured, precise compliance answer with document citations:"
+            f"DOCUMENT CONTEXT EXCERPTS:\n{context_str}\n\n"
+            f"{conversation_history_block}"
+            f"USER QUESTION: {user_question}\n\n"
+            f"Provide an accurate, well-structured answer based strictly on the excerpts above:"
         )
 
         parent_trace = [
@@ -229,11 +298,20 @@ class ComplianceRAGPipeline:
             for c in contexts
         ]
 
-        # 5. LLM Generation
-        model_display = getattr(self.llm, "model", "LLM")
+        # 5. LLM Generation (Resolve BYOK Client or Default System Client)
+        if (custom_groq_key and custom_groq_key.strip()) or (custom_openai_key and custom_openai_key.strip()) or (custom_model and custom_model.strip()):
+            active_llm = LLMFactory.get_client(
+                custom_groq_key=custom_groq_key, 
+                custom_openai_key=custom_openai_key,
+                custom_model=custom_model
+            )
+        else:
+            active_llm = self.llm
+
+        model_display = getattr(active_llm, "model", "LLM")
         logger.info(f"[STAGE 5/5] LLM GENERATION ({model_display}) -> Sending zero-hallucination prompt with {len(context_str)} chars of ground-truth context...")
         t_llm_start = time.perf_counter()
-        raw_answer = self.llm.generate(
+        raw_answer = active_llm.generate(
             prompt=user_prompt,
             system_prompt=self.SYSTEM_PROMPT
         )
@@ -245,7 +323,11 @@ class ComplianceRAGPipeline:
 
         # 6. Store in In-Engine Semantic Cache for future identical / rephrased queries
         if self.semantic_cache and raw_answer and "This topic is not covered" not in raw_answer:
-            self.semantic_cache.store(query=user_question, answer=raw_answer, citations=citations)
+            self.semantic_cache.store(query=user_question, answer=raw_answer, citations=citations, user_id=user_id)
+
+        # 7. Persist to Conversational Chat History (user query and final answer only)
+        save_chat_message(active_session_id, "user", user_question, user_id=user_id)
+        save_chat_message(active_session_id, "assistant", raw_answer, user_id=user_id)
 
         # Compile Full Pipeline Trace for Frontend Visualizer
         trace = {
@@ -272,5 +354,6 @@ class ComplianceRAGPipeline:
             citations=citations,
             execution_time_ms=total_elapsed_ms,
             total_sources_retrieved=len(citations),
+            session_id=active_session_id,
             trace=trace
         )

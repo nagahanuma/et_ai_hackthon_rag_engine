@@ -4,8 +4,12 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Banking Regulatory Compliance RAG Engine</title>
+    <title>Document Intelligence & Compliance Audit RAG Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 
 <body>
@@ -14,19 +18,23 @@
     <header>
         <div class="logo-group">
             <h1>
-                🏛️ Banking Compliance AI
+                🏛️ Document Intelligence & Audit AI
                 <span class="badge-tag">Production RAG</span>
             </h1>
         </div>
         <div style="display: flex; align-items: center; gap: 1.5rem;">
             <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <label for="apiUrlInput" style="font-size: 0.8rem; color: var(--text-muted);">API Backend:</label>
-                <input type="text" id="apiUrlInput" value="http://localhost:8000"
-                    style="background: var(--bg-card); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 0.2rem 0.5rem; font-size: 0.8rem; width: 190px;" />
+                <input type="text" id="apiUrlInput" value="" placeholder="http://localhost:8080"
+                    style="background: var(--bg-card); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 0.2rem 0.5rem; font-size: 0.8rem; width: 170px;" />
             </div>
             <div class="api-status">
                 <span class="status-dot"></span>
                 <span id="apiStatusText">Engine Online</span>
+            </div>
+            <!-- Dynamic Authentication & User Group -->
+            <div id="authHeaderGroup" style="display: flex; align-items: center; gap: 0.6rem;">
+                <!-- Populated dynamically: Login/Register button OR User Badge + BYOK + Sign Out -->
             </div>
         </div>
     </header>
@@ -34,9 +42,13 @@
     <!-- Navigation Tabs -->
     <nav class="tabs-bar">
         <button class="tab-btn active" onclick="switchTab('tab-docs')">📁 Documents Manager (CRUD)</button>
-        <button class="tab-btn" onclick="switchTab('tab-chat')">💬 Compliance Audit Chat</button>
+        <button class="tab-btn" onclick="switchTab('tab-chat')">
+            💬 Compliance Audit Chat
+            <span id="navChatPill" style="font-size: 0.7rem; margin-left: 0.4rem; padding: 1px 7px; border-radius: 10px; background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 600;">Checking...</span>
+        </button>
         <button class="tab-btn" onclick="switchTab('tab-flow')">🔬 RAG Process Flow & Observability</button>
         <button class="tab-btn" onclick="switchTab('tab-storage')">🗄️ Storage Explorer (SQLite vs Chroma)</button>
+        <button class="tab-btn" id="tabBtnAdmin" onclick="switchTab('tab-admin')" style="display: none; border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;">👑 Admin Analytics</button>
     </nav>
 
     <main>
@@ -47,17 +59,21 @@
         <section id="tab-docs" class="tab-pane active">
 
             <!-- Upload Dropzone -->
-            <div class="card">
+            <div class="card card-dropzone">
                 <div class="card-title">
-                    <span>📤 Ingest Regulatory Document</span>
-                    <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: normal;">Supported: .pdf,
-                        .docx, .txt, .md (Max 100 MB)</span>
+                    <span>📤 Upload & Index Document</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: normal;">Supported: .pdf, .docx, .txt, .md (Max 50 MB)</span>
                 </div>
-                <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
-                    <p style="font-size: 1.1rem; color: #fff; margin-bottom: 0.5rem;">📁 Click or Drag & Drop Regulatory
-                        Files Here</p>
-                    <p>Streams page-by-page with table extraction, parent-child chunking, and ChromaDB vector indexing
-                    </p>
+                <div class="dropzone" id="dropzone" onclick="handleDropzoneClick()">
+                    <div class="dropzone-icon-wrap">
+                        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                    </div>
+                    <p class="dropzone-primary-text">Click or Drag & Drop Documents Here</p>
+                    <p class="dropzone-sub-text">High-speed streaming parser • Table extraction • Parent-Child chunking • Vector embeddings</p>
                     <input type="file" id="fileInput" style="display: none;" accept=".pdf,.txt,.md"
                         onchange="handleFileUpload(event)" />
                 </div>
@@ -73,6 +89,20 @@
                             style="width: 0%; height: 100%; background-color: var(--accent-cyan); transition: width 0.3s;">
                         </div>
                     </div>
+                </div>
+
+                <!-- Live Ingestion Success Callout Banner -->
+                <div id="uploadSuccessBanner" style="display: none; margin-top: 1rem; padding: 0.85rem 1.2rem; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span style="font-size: 1.3rem;">🎉</span>
+                        <div>
+                            <div style="color: #10b981; font-weight: 600; font-size: 0.92rem;" id="uploadSuccessTitle">Ingestion & pgvector Indexing Complete!</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;" id="uploadSuccessDetail">The Chatbot is loaded with this document and ready to answer queries.</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="switchTab('tab-chat')" style="font-size: 0.82rem; padding: 6px 14px; background: #10b981; border: none; white-space: nowrap;">
+                        💬 Open Chat & Ask AI ➔
+                    </button>
                 </div>
             </div>
 
@@ -90,7 +120,7 @@
                             <th>Pages</th>
                             <th>Size</th>
                             <th>Parent Chunks</th>
-                            <th>Ingested Date</th>
+                            <th>Ingestion Time</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -109,23 +139,65 @@
          TAB 2: COMPLIANCE AUDIT CHAT
          ========================================== -->
         <section id="tab-chat" class="tab-pane">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                <span style="font-size: 0.9rem; color: var(--text-muted);">💬 Real-Time Compliance Auditor (Strict Grounding)</span>
-                <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 4px 12px;" onclick="clearSemanticCacheUI()" title="Purges all cached answers from ChromaDB so you can demonstrate fresh LLM vs Cache Hit">🧹 Reset Semantic Cache</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <span style="font-size: 0.9rem; color: var(--text-muted);">💬 Real-Time Compliance Auditor (Strict Grounding)</span>
+                    <span id="activeSessionBadge" style="font-size: 0.75rem; background: rgba(56, 189, 248, 0.15); color: var(--accent-cyan); border: 1px solid rgba(56, 189, 248, 0.3); padding: 2px 8px; border-radius: 12px; font-weight: 500;">New Session</span>
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 4px 12px;" onclick="toggleChatHistoryDrawer()" title="View and resume previous conversation history">📜 Past Sessions (<span id="chatHistoryCount">0</span>)</button>
+                    <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 4px 12px;" onclick="startNewChat()" title="Start a fresh conversational chat session">➕ New Session</button>
+                    <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 4px 12px;" onclick="clearSemanticCacheUI()" title="Purges all cached answers from ChromaDB so you can demonstrate fresh LLM vs Cache Hit">🧹 Reset Semantic Cache</button>
+                </div>
             </div>
+
+            <!-- Collapsible User Chat History Drawer -->
+            <div id="chatHistoryDrawer" class="chat-history-drawer" style="display: none;">
+                <div class="chat-history-header">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <strong style="color: #fff; font-size: 0.85rem;">📜 Your Conversation History</strong>
+                        <span id="chatHistoryUserTag" class="badge-tag" style="background: rgba(56, 189, 248, 0.15); color: var(--accent-cyan); font-size: 0.72rem;">User</span>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <button class="btn-danger" style="font-size: 0.72rem; padding: 2px 8px;" onclick="clearAllChatHistory()" title="Delete all conversation sessions to reclaim database storage">🗑️ Delete All History</button>
+                        <button class="btn-icon" onclick="toggleChatHistoryDrawer()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; padding: 0 4px;" title="Close Drawer">✕</button>
+                    </div>
+                </div>
+                <div id="chatHistoryList" class="chat-history-list">
+                    <div style="color: var(--text-muted); font-size: 0.8rem; text-align: center; padding: 1rem;">Loading your conversation sessions...</div>
+                </div>
+            </div>
+
+            <!-- Active Knowledge Base Live Status Pill -->
+            <div id="chatKnowledgeBanner" style="background: rgba(30, 41, 59, 0.65); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 0.65rem 1rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                <div style="display: flex; align-items: center; gap: 0.6rem;">
+                    <span id="chatKnowledgeDot" style="width: 9px; height: 9px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.6); display: inline-block;"></span>
+                    <strong style="color: #fff;">Active Knowledge Base:</strong>
+                    <span id="chatKnowledgeText" style="color: var(--text-muted);">Checking indexed documents...</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.6rem;">
+                    <span id="chatKnowledgeVectorCount" class="badge-tag" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">Ready</span>
+                    <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 2px 8px;" onclick="refreshKnowledgeStatus()">🔄 Check Status</button>
+                </div>
+            </div>
+
             <div class="chat-window">
                 <div class="chat-messages" id="chatMessages">
                     <div class="message bot">
-                        <p><strong>🏛️ Banking Compliance AI Officer</strong></p>
-                        <p>I am grounded strictly on the active regulatory circulars and policies indexed in the
-                            database. Ask any compliance question to receive verified answers with page citations.</p>
+                        <p><strong>🏛️ Document Audit & Compliance AI</strong></p>
+                        <p id="chatBotWelcomeMsg">I am grounded strictly on the documents and files indexed in your account. Ask any question to receive verified answers with exact page citations.</p>
                     </div>
                 </div>
+
+
                 <div class="chat-input-bar">
                     <input type="text" id="chatInput" class="chat-input"
-                        placeholder="e.g. What did we build in step 4? What are the capital requirements?"
+                        placeholder="e.g. What are the key compliance requirements? Summarize section 3..."
                         onkeydown="if(event.key === 'Enter') sendQuery()" />
-                    <button class="btn btn-primary" onclick="sendQuery()">Ask Compliance AI</button>
+                    <button class="btn btn-primary btn-send" onclick="sendQuery()">
+                        <span>Ask AI</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
                 </div>
             </div>
         </section>
@@ -141,9 +213,19 @@
                         yet</span>
                 </div>
                 <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
-                    Shows the exact pipeline execution stages: Vector similarity scoring, BM25 keywords, Reciprocal Rank
-                    Fusion, SQLite parent resolution, and the raw prompt sent to the LLM.
+                    Shows the exact pipeline execution stages: Verified page numbers, vector similarity scoring, BM25 keywords, Reciprocal Rank Fusion, SQLite parent resolution, and the raw prompt sent to the LLM.
                 </p>
+
+                <!-- Audit Verification: Verified Document Sources & Page Numbers -->
+                <div class="flow-step" style="border: 1px solid rgba(6, 182, 212, 0.4); background: rgba(6, 182, 212, 0.04); margin-bottom: 1.25rem;">
+                    <div class="flow-header">
+                        <span style="color: var(--accent-cyan); font-weight: 700;">📑 Verified Document Sources & Page Citations</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Exact Regulatory Audit Trail</span>
+                    </div>
+                    <div id="traceCitationsList" style="padding: 0.25rem 0;">
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">Ask a compliance question in the chat tab to view linked regulatory page numbers and audit sources here.</span>
+                    </div>
+                </div>
 
                 <!-- Pipeline Step 1: Query & Execution Times -->
                 <div class="flow-step">
@@ -241,7 +323,160 @@
             </div>
         </section>
 
+        <!-- ==========================================
+         TAB 5: ADMIN RESOURCE & USER MONITORING
+         ========================================== -->
+        <section id="tab-admin" class="tab-pane">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div>
+                    <h2 style="font-size: 1.25rem; font-weight: 700; margin: 0; color: #fff;">👑 Admin Control Center & Resource Monitoring</h2>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0.2rem 0 0 0;">
+                        Live registry of all registered users and application resources consumed (Queries & Tokens).
+                    </p>
+                </div>
+                <button class="btn btn-secondary" onclick="loadAdminUsers()">🔄 Refresh Analytics</button>
+            </div>
+
+            <!-- KPI Metric Summary -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                <div class="card" style="text-align: center; padding: 1.2rem; margin-bottom: 0;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Registered Users</div>
+                    <div id="adminStatTotalUsers" style="font-size: 2.2rem; font-weight: 700; color: var(--accent-cyan); margin-top: 0.3rem;">0</div>
+                </div>
+                <div class="card" style="text-align: center; padding: 1.2rem; margin-bottom: 0;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Total Queries</div>
+                    <div id="adminStatTotalQueries" style="font-size: 2.2rem; font-weight: 700; color: #10b981; margin-top: 0.3rem;">0</div>
+                </div>
+                <div class="card" style="text-align: center; padding: 1.2rem; margin-bottom: 0;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Est. Tokens Consumed</div>
+                    <div id="adminStatTotalTokens" style="font-size: 2.2rem; font-weight: 700; color: #f59e0b; margin-top: 0.3rem;">0</div>
+                </div>
+                <div class="card" style="text-align: center; padding: 1.2rem; margin-bottom: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">
+                        <span>Supabase Free Tier</span>
+                        <span id="adminStatStoragePct" style="color: var(--accent-cyan);">0%</span>
+                    </div>
+                    <div id="adminStatStorageUsed" style="font-size: 1.7rem; font-weight: 700; color: #38bdf8; margin-top: 0.2rem;">0 KB <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: 400;">/ 500 MB</span></div>
+                    <div class="storage-quota-bar">
+                        <div id="adminStorageQuotaProgress" class="storage-quota-progress" style="width: 1%;"></div>
+                    </div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.35rem;">Total Chunks: <strong id="adminStatTotalChunks" style="color: #fff;">0</strong></div>
+                </div>
+            </div>
+
+            <!-- Registered Users Table -->
+            <div class="card">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                    <span>👥 User Directory & Storage Consumption</span>
+                    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                        <input type="text" id="adminUserSearchInput" placeholder="🔍 Filter users..." oninput="filterAdminUsersTable()" style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 10px; color: #fff; font-size: 0.8rem; width: 170px;">
+                        <button class="btn btn-secondary" onclick="triggerAdminCleanup()" style="color: #f59e0b; border-color: rgba(245, 158, 11, 0.4); font-size: 0.78rem;" title="Purge user accounts and documents inactive for > 90 days">🧹 Run Inactive Purge</button>
+                        <button class="btn btn-secondary" onclick="loadAdminUsers()" style="font-size: 0.78rem;">🔄 Refresh</button>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Docs</th>
+                            <th>Storage (DB)</th>
+                            <th>Vectors</th>
+                            <th>Queries</th>
+                            <th>Tokens</th>
+                            <th>Last Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminUsersTableBody">
+                        <tr><td colspan="9" style="text-align: center; color: var(--text-muted);">Loading user metrics...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
     </main>
+
+    <!-- ==========================================
+     AUTH MODAL (LOGIN & REGISTRATION)
+     ========================================== -->
+    <div id="authModal" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div style="display: flex; gap: 0.5rem;" id="authTabButtons">
+                    <button class="btn btn-primary" id="btnTabLogin" onclick="switchAuthTab('login')">Sign In</button>
+                    <button class="btn btn-secondary" id="btnTabRegister" onclick="switchAuthTab('register')">Register</button>
+                </div>
+                <button class="btn btn-secondary" style="padding: 2px 8px;" onclick="closeAuthModal()">✕</button>
+            </div>
+
+            <form id="authForm" onsubmit="handleAuthSubmit(event)">
+                <div id="authUsernameGroup" style="margin-bottom: 0.75rem;">
+                    <label id="authLoginLabel" style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">Username or Email</label>
+                    <input type="text" id="authLoginInput" class="chat-input" placeholder="Enter your username or email" required style="width: 100%; box-sizing: border-box;" />
+                </div>
+
+                <div id="authEmailGroup" style="margin-bottom: 0.75rem; display: none;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">Email Address</label>
+                    <input type="email" id="authEmailInput" class="chat-input" placeholder="name@organization.com" style="width: 100%; box-sizing: border-box;" />
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">Password</label>
+                    <input type="password" id="authPasswordInput" class="chat-input" placeholder="••••••••" required style="width: 100%; box-sizing: border-box;" />
+                </div>
+
+                <div id="authErrorMsg" style="color: var(--accent-red); font-size: 0.8rem; margin-bottom: 0.75rem; display: none;"></div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="authHintText" style="font-size: 0.75rem; color: var(--text-muted);"><span style="color: var(--accent-green);">●</span> Secure Connection</span>
+                    <button type="submit" class="btn btn-primary" id="authSubmitBtn">Sign In</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==========================================
+     BYOK SETTINGS MODAL (CUSTOM API KEYS)
+     ========================================== -->
+    <div id="settingsModal" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                <h3 style="margin: 0; font-size: 1.1rem; color: #fff;">⚙️ Custom LLM API Keys (BYOK)</h3>
+                <button class="btn btn-secondary" style="padding: 2px 8px;" onclick="closeSettingsModal()">✕</button>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem; line-height: 1.4;">
+                Provide your personal API keys to run queries using your own account. If left empty, the system automatically uses the application's default Groq key.
+            </p>
+            <div style="font-size: 0.75rem; color: var(--accent-cyan); margin-bottom: 0.85rem; padding: 6px 10px; background: rgba(56, 189, 248, 0.08); border-radius: 6px; border-left: 2px solid var(--accent-cyan); line-height: 1.4;">
+                ℹ️ <strong>Unified Embedding Architecture:</strong> Vector embeddings are standardized via <code>BAAI/bge-m3</code> (1024-d) across all indexed documents. Your selected key and model power deep generative reasoning and large-context synthesis.
+            </div>
+            <form onsubmit="handleSaveSettings(event)">
+                <div style="margin-bottom: 0.75rem;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">Preferred LLM Model & Context Window</label>
+                    <select id="settingCustomModel" class="chat-input" style="width: 100%; box-sizing: border-box; background: var(--bg-surface-2);">
+                        <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (128k Context - Recommended for 5000+ Pages)</option>
+                        <option value="openai/gpt-oss-20b">openai/gpt-oss-20b (16k Context - High Speed)</option>
+                        <option value="deepseek-r1-distill-llama-70b">deepseek-r1-distill-llama-70b (128k Context - Deep Audit Reasoning)</option>
+                        <option value="gpt-4o">gpt-4o (128k Context - OpenAI Flagship)</option>
+                        <option value="gpt-4o-mini">gpt-4o-mini (128k Context - OpenAI Fast)</option>
+                    </select>
+                </div>
+                <div style="margin-bottom: 0.75rem;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">Custom Groq API Key (gsk_...)</label>
+                    <input type="password" id="settingGroqKey" class="chat-input" placeholder="gsk_..." style="width: 100%; box-sizing: border-box;" />
+                </div>
+                <div style="margin-bottom: 1.1rem;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">Custom OpenAI API Key (sk-...)</label>
+                    <input type="password" id="settingOpenAIKey" class="chat-input" placeholder="sk-..." style="width: 100%; box-sizing: border-box;" />
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>

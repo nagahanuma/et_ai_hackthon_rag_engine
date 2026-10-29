@@ -42,28 +42,43 @@ class HybridRetriever:
         Tokenizes text for fast exact-keyword matching.
         """
         if child_chunks is None:
-            # Fetch all documents currently stored in the ChromaDB collection
-            collection_data = self.vector_manager.collection.get(
-                include=["documents", "metadatas"]
-            )
-            if not collection_data or not collection_data["ids"]:
-                logger.warning("No documents found in ChromaDB to build BM25 index.")
-                return
+            from src.db import is_postgres
+            if is_postgres():
+                from src.db import get_db_connection
+                from psycopg2.extras import RealDictCursor
+                with get_db_connection() as conn:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute("SELECT child_id, content, parent_id, doc_id, page_number FROM child_chunks;")
+                        rows = cur.fetchall()
+                        self.corpus_chunks = [dict(r) for r in rows]
+                if not self.corpus_chunks:
+                    logger.warning("No documents found in Supabase child_chunks to build BM25 index.")
+                    return
+            else:
+                if not self.vector_manager.collection:
+                    logger.warning("No ChromaDB collection available to build BM25 index.")
+                    return
+                collection_data = self.vector_manager.collection.get(
+                    include=["documents", "metadatas"]
+                )
+                if not collection_data or not collection_data["ids"]:
+                    logger.warning("No documents found in ChromaDB to build BM25 index.")
+                    return
 
-            self.corpus_chunks = []
-            for cid, doc, meta in zip(
-                collection_data["ids"],
-                collection_data["documents"],
-                collection_data["metadatas"]
-            ):
-                self.corpus_chunks.append({
-                    "child_id": cid,
-                    "content": doc,
-                    "parent_id": meta.get("parent_id", ""),
-                    "doc_id": meta.get("doc_id", ""),
-                    "page_number": meta.get("page_number", 1),
-                    "content_type": meta.get("content_type", "text"),
-                })
+                self.corpus_chunks = []
+                for cid, doc, meta in zip(
+                    collection_data["ids"],
+                    collection_data["documents"],
+                    collection_data["metadatas"]
+                ):
+                    self.corpus_chunks.append({
+                        "child_id": cid,
+                        "content": doc,
+                        "parent_id": meta.get("parent_id", ""),
+                        "doc_id": meta.get("doc_id", ""),
+                        "page_number": meta.get("page_number", 1),
+                        "content_type": meta.get("content_type", "text"),
+                    })
         else:
             self.corpus_chunks = child_chunks
 
@@ -103,7 +118,8 @@ class HybridRetriever:
         top_k_dense: int = 20,
         top_k_bm25: int = 20,
         final_top_parents: int = 5,
-        rrf_k: int = 60
+        rrf_k: int = 60,
+        allowed_doc_ids: Optional[List[str]] = None
     ) -> List[RetrievedContext]:
         """
         Executes Hybrid Search:
@@ -111,11 +127,24 @@ class HybridRetriever:
         2. Sparse Keyword Search (BM25)
         3. Reciprocal Rank Fusion (RRF)
         4. Resolves unique full Parent Chunks from SQLite
+        If allowed_doc_ids is provided, restricts retrieval to documents owned by the active user.
         """
-        logger.info(f"[START QUERY PIPELINE] '{query}'")
+        logger.info(f"[START QUERY PIPELINE] '{query}' (Allowed docs filter: {len(allowed_doc_ids) if allowed_doc_ids is not None else 'ALL'})")
 
-        # 1. Dense Vector Search
-        dense_results = self.vector_manager.search(query=query, top_k=top_k_dense)
+        # If user has an explicit allowed_doc_ids list that is empty, they have 0 documents
+        if allowed_doc_ids is not None and len(allowed_doc_ids) == 0:
+            logger.info("User has no indexed documents. Returning empty context.")
+            return []
+
+        # 1. Dense Vector Search (Multi-tenant filtered)
+        dense_results = self.vector_manager.search(
+            query=query, 
+            top_k=top_k_dense, 
+            allowed_doc_ids=allowed_doc_ids
+        )
+        if allowed_doc_ids is not None:
+            dense_results = [r for r in dense_results if r.doc_id in allowed_doc_ids]
+
         top_dense_info = (
             f"Top match: {dense_results[0].child_id} (Score: {dense_results[0].score:.4f}, Page {dense_results[0].page_number})"
             if dense_results else "No matches"
@@ -123,11 +152,14 @@ class HybridRetriever:
         logger.info(f"[STAGE 1/4] DENSE VECTOR SEARCH (ChromaDB) -> Retrieved {len(dense_results)} candidates. {top_dense_info}")
         
         # 2. Sparse BM25 Search
-        total_vectors = self.vector_manager.collection.count()
+        total_vectors = self.vector_manager.count()
         if not self.bm25_index or len(self.corpus_chunks) != total_vectors:
             logger.info(f"[BM25 SYNC] Synchronizing BM25 sparse index ({len(self.corpus_chunks)} -> {total_vectors} vectors)...")
             self.build_bm25_index()
         bm25_results = self.search_bm25(query=query, top_k=top_k_bm25)
+        if allowed_doc_ids is not None:
+            bm25_results = [r for r in bm25_results if r.get("doc_id") in allowed_doc_ids]
+
         top_bm25_info = (
             f"Top match: {bm25_results[0]['child_id']} (Score: {bm25_results[0]['bm25_score']:.4f}, Page {bm25_results[0]['page_number']})"
             if bm25_results else "No matches"

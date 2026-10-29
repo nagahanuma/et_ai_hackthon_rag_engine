@@ -1,4 +1,4 @@
-# 🏛️ Banking Regulatory Compliance & Internal Audit RAG Engine
+# 🏛️ Enterprise Document Intelligence & Compliance Audit RAG Engine
 ### Enterprise Production-Grade Hybrid RAG | 100% Free Open-Source & Edge Stack
 > **ET AI Hackathon 2026** | Problem Statement 1 (Financial Services & Regulatory Compliance Domain)
 
@@ -189,12 +189,74 @@ EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
 ```
 
 ### 5. Launch the Application
-```bash
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-or
-python -m uvicorn src.main:app --reload
 
+#### Option A: Run Locally via Python (Virtual Environment)
+```bash
+# Using uvicorn directly
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Or via python module
+python -m uvicorn src.main:app --reload
 ```
+App will be accessible at: `http://localhost:8000/app/index.html`
+
+---
+
+### 🐳 Running via Docker
+
+#### Step 1: Build the Docker Image
+```bash
+docker build -t document-intelligence-rag:local .
+```
+
+#### Step 2: Run the Container
+
+##### 1. Directly with `.env` file (Works in both CMD & PowerShell)
+Loads all your API keys and configuration directly from `.env`:
+```bash
+docker run -d --name rag-engine-test -p 8080:8080 -v "%cd%/data:/app/data" --env-file .env document-intelligence-rag:local
+```
+*(On PowerShell, use `${PWD}/data:/app/data` for volume mapping, or run without `-v`)*:
+```powershell
+docker run -d --name rag-engine-test -p 8080:8080 -v "${PWD}/data:/app/data" --env-file .env document-intelligence-rag:local
+```
+
+##### 2. 1-Click via PowerShell Script
+Run the automated pre-flight script:
+```powershell
+.\run_docker_local.ps1
+```
+
+##### 3. 1-Click via Windows Command Prompt (CMD)
+Run the batch runner:
+```cmd
+run_docker_local.bat
+```
+
+##### 4. Running via Docker Desktop UI
+When launching from the Docker Desktop **"Run a new container"** dialog:
+* **Container Name**: `rag-engine-test`
+* **Host Port**: `8080` (maps to `:8080/tcp`)
+* **Volumes** *(Optional)*: Host path: `E:\2026\ET_Hackthon\EThack\data` | Container path: `/app/data`
+* **Environment Variables**:
+  * `PROD_MODE` = `N` *(Important: ensures localhost requests are accepted)*
+  * `GROQ_API_KEY` = `<your-groq-key>`
+  * `DATABASE_URL` = `<your-database-url>`
+  * `LLM_PROVIDER` = `groq`
+  * `LLM_MODEL` = `openai/gpt-oss-20b`
+
+#### Container Logs & Access
+* **Web UI Dashboard**: [http://localhost:8080/app/index.html](http://localhost:8080/app/index.html)
+* **API Documentation**: [http://localhost:8080/docs](http://localhost:8080/docs)
+* **View Container Logs**:
+  ```bash
+  docker logs -f rag-engine-test
+  ```
+* **Stop Container**:
+  ```bash
+  docker stop rag-engine-test && docker rm rag-engine-test
+  ```
+
 
 ---
 
