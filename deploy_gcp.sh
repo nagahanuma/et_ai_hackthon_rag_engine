@@ -44,7 +44,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --timeout 1800 \
     --concurrency 20 \
     --no-cpu-throttling \
-    --set-env-vars "DATABASE_URL=$DATABASE_URL,GROQ_API_KEY=$GROQ_API_KEY,PROD_MODE=Y,MAX_UPLOAD_SIZE_MB=50,ADMIN_USERNAME=nagahanuma,ADMIN_PASSWORD=Rag@Prod,ADMIN_EMAIL=nagahanuma@compliance.ai,EMBEDDING_PROVIDER=local,EMBEDDING_MODEL=BAAI/bge-m3,EMBEDDING_DEVICE=cpu,LLM_PROVIDER=groq,LLM_MODEL=openai/gpt-oss-120b" \
+    --set-env-vars ...... \
     --allow-unauthenticated
 
 URL=$(gcloud run services describe "$SERVICE_NAME" --platform managed --region "$REGION" --format 'value(status.url)')
