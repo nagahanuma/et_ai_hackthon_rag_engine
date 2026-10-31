@@ -50,7 +50,7 @@ gcloud run deploy document-intelligence-rag \
   --timeout 1800 \
   --concurrency 20 \
   --no-cpu-throttling \
-  --set-env-vars "DATABASE_URL=postgresql://postgres.ilocytyhyskabofjdupe:8uhqa41JYs1MVUKK@aws-0-ap-south-1.pooler.supabase.com:6543/postgres,GROQ_API_KEY=gsk_your_groq_api_key_here,PROD_MODE=Y,ADMIN_USERNAME=nagahanuma,ADMIN_PASSWORD=Rag@Prod,ADMIN_EMAIL=nagahanuma@compliance.ai,EMBEDDING_PROVIDER=local,EMBEDDING_MODEL=BAAI/bge-m3,EMBEDDING_DEVICE=cpu,LLM_PROVIDER=groq,LLM_MODEL=openai/gpt-oss-120b" \
+  --set-env-vars ...........
   --allow-unauthenticated
 ```
 
