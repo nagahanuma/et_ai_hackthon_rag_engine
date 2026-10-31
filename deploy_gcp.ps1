@@ -67,7 +67,7 @@ gcloud run deploy $ServiceName `
     --timeout 1800 `
     --concurrency 20 `
     --no-cpu-throttling `
-    --set-env-vars "DATABASE_URL=$DatabaseUrl,GROQ_API_KEY=$GroqApiKey,PROD_MODE=Y,MAX_UPLOAD_SIZE_MB=50,ADMIN_USERNAME=nagahanuma,ADMIN_PASSWORD=Rag@Prod,ADMIN_EMAIL=nagahanuma@compliance.ai,EMBEDDING_PROVIDER=local,EMBEDDING_MODEL=BAAI/bge-m3,EMBEDDING_DEVICE=cpu,LLM_PROVIDER=groq,LLM_MODEL=openai/gpt-oss-120b" `
+    --set-env-vars "..." `
     --allow-unauthenticated
 
 if ($LASTEXITCODE -eq 0) {
